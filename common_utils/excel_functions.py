@@ -8,10 +8,12 @@ from common_utils.os_functions import check_create_new_folder
 from decimal import Decimal
 import datetime 
 import re 
+import os 
 import math 
 import warnings 
 import numpy as np
-
+import xlwings as xw 
+import win32com.client as client
 
 """pandas save_excel """
 def pd_save_excel(df,save_path,startrow=0,startcol=0):
@@ -26,10 +28,12 @@ def pd_save_excel(df,save_path,startrow=0,startcol=0):
 	print('{0} Saved'.format(save_path))
 
 """这里主要是xlsxwriter的方法"""
-def autofit_column_width(xlsxwriter_ws,header_columns,content_columns=[],wrap_text=False):
+def autofit_column_width(xlsxwriter_ws,header_columns,content_columns=[],wrap_text=False, **kwargs):
 	"""根据表头的字符长度自动调整EXCEL表头的列宽
 	   content_columns是专门给特长的列加宽
 	"""
+	min_column_width = kwargs.get('min_column_width',10)
+
 	cn_pat = "[\u4e00-\u9fa5]+"
 	en_pat = "[^\u4e00-\u9fa5]+"
 
@@ -37,7 +41,7 @@ def autofit_column_width(xlsxwriter_ws,header_columns,content_columns=[],wrap_te
 	header_columns = [str(x) for x in header_columns]
 
 	if wrap_text == False:
-		length_list = [ len(''.join(re.findall(cn_pat,c)))*2 + len(''.join(re.findall(en_pat,c)))*1  + 2 \
+		length_list = [ len(''.join(re.findall(cn_pat,c)))*2 + len(''.join(re.findall(en_pat,c)))*1  + 4 \
 							for c in list(header_columns)] 
 		for i, width in enumerate(length_list):
 			xlsxwriter_ws.set_column(i,i,width)
@@ -46,10 +50,11 @@ def autofit_column_width(xlsxwriter_ws,header_columns,content_columns=[],wrap_te
 
 	else: #如果采用wrap_text方式，计算两层的中文wrap结果 
 		length_list = [ math.ceil(len(''.join(re.findall(cn_pat,c)))/2) * 2 + \
-						math.ceil(len(''.join(re.findall(en_pat,c)))/2)* 1 + 2 \
+						math.ceil(len(''.join(re.findall(en_pat,c)))/2) * 1 + 2 \
 							for c in list(header_columns)] 
+
 		#确保每列的宽度至少是4 
-		length_list = [x if x >= 10 else 10 for x  in length_list ]
+		length_list = [x if x >= min_column_width else min_column_width for x in length_list ]
 
 		for i, width in enumerate(length_list):
 			xlsxwriter_ws.set_column(i,i,width)
@@ -211,7 +216,7 @@ def df_sheet_check(df_list,sheet_name_list):
 	if len(df_list) != len(sheet_name_list):
 		print('写入的数据表数量和填入的Sheet名称数量不相等,将使用默认Sheet名称')
 		
-	if sheet_name_list == [None] or len(sheet_name_list) == 0 :
+	if sheet_name_list == None or sheet_name_list == [ ] :
 		sheet_name_list= []
 		for i in range(len(df_list)):
 			sheet_name_list.append('Sheet {}'.format(i+1))
@@ -278,13 +283,55 @@ def write_pct_columns(save_path,df_list,sheet_name_list=[],pct_columns=[],conten
 	save_xlsxwriter_wb(xlsxwriter_wb,save_path)
 
 
-def write_format_columns(save_path,df_list,sheet_name_list=[],pct_columns=[],content_columns=[],**kwargs):
+def replace_invalid_strs(string):
+	invalid_strs = [ '\ud835' ]
+	for i in invalid_strs:
+		string = string.replace(i,'')
+	return string 
+
+
+def refresh_excel_calculations(file_path):
+	if not os.path.isabs(file_path):
+		file_path = os.path.join(os.getcwd(), file_path)
+
+	xlapp = xw.App(visible=False)
+	xlapp.display_alerts = False
+	xlwb = xw.Book(file_path)
+	xlwb.Visible = False
+	xlapp.calculate()
+	xlwb.save()
+	xlapp.quit()
+
+	del xlapp
+
+# def refresh_excel_calculations(file_path):
+# 	file_path = os.path.join(os.getcwd(), file_path )
+# 	#检查输出文件夹 是否存在
+# 	if not os.path.isfile(file_path):
+# 		enter_exit("File not found: ",file_path)
+
+# 	#打开文档，运行VBA, 如果有报错，everything 搜索gen_py文件 删除，让系统重新生成新的gen_py
+# 	xlapp = client.gencache.EnsureDispatch('Excel.Application')   
+# 	xlapp.Visible = 0  
+# 	xlapp.DisplayAlerts = False 
+# 	xlwb = xlapp.Workbooks.Open(file_path) 
+# 	xlwb.Visible = 0
+# 	xlapp.Calculate()
+# 	xlwb.Close(True)
+# 	xlapp.Quit
+
+
+def write_format_columns(save_path,df_list,sheet_name_list=[],pct_columns=[],round_columns=[],content_columns=[],**kwargs):
 	"""给定一个表格，用百分比写入包含指定文字的列,表头wrap_text, 添加选项,上面write_pct_columns方式不写是不希望每列str都变成text格式，
 	   正常应该是常规格式
 	   基本和前面的write_pct_columns相同，区别在于加上了整列如果都是str用text格式写入的方式"""
 	xlsxwriter_wb = Workbook(save_path)
 
-	num_format = kwargs.get('num_format','0.00%')
+	min_column_width = kwargs.get('min_column_width', 12)
+
+	round_list = kwargs.get('round_list',[ '标准差','平均','方差'])
+	pct_list = kwargs.get('pct_list',['rate','百分比','占比','比例','比率'])
+
 	#通用表头格式
 	background_color = rgb_convert_hex([220,230,241])
 	border_color = rgb_convert_hex([149,179,215])
@@ -300,7 +347,8 @@ def write_format_columns(save_path,df_list,sheet_name_list=[],pct_columns=[],con
 	pct_format = xlsxwriter_wb.add_format({'font_name':'calibri','font_size':11,'num_format':'0.00%'})
 	text_format = xlsxwriter_wb.add_format({'font_name':'calibri','font_size':11,'num_format':'@'})
 	normal_format = xlsxwriter_wb.add_format({'font_name':'calibri','font_size':11})
-
+	round_format = xlsxwriter_wb.add_format({'font_name':'calibri','font_size':11,'num_format':'0.00'})
+	
 	df_list, sheet_name_list = df_sheet_check(df_list, sheet_name_list)
 
 	for df,sheet_name in zip(df_list,sheet_name_list):
@@ -315,17 +363,23 @@ def write_format_columns(save_path,df_list,sheet_name_list=[],pct_columns=[],con
 
 			for column_index,column in enumerate(header_columns):
 				column_values = df[column].to_list()
-
-				if column in pct_columns:  #如果属于百分比列 
+				if column in pct_columns or len([ x for x in pct_list if x in column]) > 0:  #如果属于百分比列 
 					column_format = pct_format
+				elif column in round_columns or len([ x for x in round_list if x in column]) > 0  : #如果属于需要round的列
+					column_format = round_format
 				#判断是否整列都属于str格式，采用text格式写入
 				elif df[column].apply(type).eq(str).all():
 					column_format = text_format
 				#如果本列是日期类型,采用日期格式写入, 第二步应该到判断content_columns 还是 date? -- 以可以输入的参数为优先做判断
 				elif np.issubdtype(df[column].dtype, np.datetime64) :
+					column_values = []
 					column_format = date_format
+				#是否整列都是float格式
+				# elif df[column].apply(type).eq(float).all():
+				# 	column_format = round_format
 				else:
-					column_values = [ x if x == x else '' for x in column_values  ]
+					column_values = [ x if x == x and type(x) == str else x for x in column_values  ]
+					column_values = [ x if x == x else '' for x in column_values]
 					column_format =  normal_format
 
 				xlsxwriter_ws.write_column(row=1,col=column_index,data=column_values,cell_format=column_format)
@@ -333,7 +387,8 @@ def write_format_columns(save_path,df_list,sheet_name_list=[],pct_columns=[],con
 			#表头加上选项
 			xlsxwriter_ws.autofilter(0,0,len(df)-1,len(header_columns)-1)
 
-			autofit_column_width(xlsxwriter_ws,header_columns,content_columns=content_columns,wrap_text=True)
+			autofit_column_width(xlsxwriter_ws,header_columns,content_columns=content_columns,
+											wrap_text=True, min_column_width=min_column_width)
 
 			#冻结第一行窗口
 			xlsxwriter_ws.freeze_panes(1,0)

@@ -7,10 +7,8 @@ import sys
 import json
 from openpyxl import load_workbook
 from common_utils.os_functions import last_day_of_month,enter_exit, generate_md5
-from common_utils.regex_functions import replace_re_special, strQ2B, strB2Q
-from common_utils.nlp_functions import get_keyword_dict, get_word_freq_dict, convert_key2list, process_text_eng
-from common_utils.excel_functions import write_format_columns
-from common_utils.func_classes import DfDict
+from common_utils.regex_functions import replace_re_special, strQ2B
+from common_utils.nlp_functions import get_keyword_dict, get_word_freq_dict, convert_key2list
 import gc 
 import re 
 import warnings 
@@ -62,22 +60,16 @@ def generate_complete_index(df, group_columns):
             if c_min < column_min:
                 column_min = c_min
 
-            if column_max < 5: #最小保证要是5以上(week_1 报错)
-                num_unique_values = [ x for x in range(0,11)]
-            elif column_max >= 5 and column_max <= 15: #临时限定补充的部分不超过12，通常计算不会超过这个(天/周维度)，否则计算的数据量太大
-                num_unique_values = [ x for x in range(column_min, column_max + 1 )]
+            if column_max <= 13: #临时限定补充的部分不超过15，通常计算不会超过这个，否则计算的数据量太大
+                num_unique_values = [ x for x in range(column_min, column_max + 1)]
             else:
-                num_unique_values = [ x for x in range(0,16) ]
-
+                num_unique_values = [ x for x in range(1,13) ]
         except: #如果不是数字列，获取所有唯一值
             pass 
 
     #如果存在数字列,生成完整的df 
     if num_unique_values:
-        try:
-            group_columns.remove(number_column)
-        except KeyError:
-            enter_exit('Error when trying to generate complete date index, please check datetime column value in config files!')
+        group_columns.remove(number_column)
         df_temp = df.loc[:,group_columns]
         df_temp = df_temp.drop_duplicates()
 
@@ -94,7 +86,6 @@ def generate_complete_index(df, group_columns):
 
     return df_temp_total
 
-
 #创建一个完整的主键
 def set_index_drop_all(df, index_columns):
     df_copy = df.copy()
@@ -108,14 +99,13 @@ def set_index_drop_all(df, index_columns):
     return df_copy
 
 def df_query(df, condition):
-    if type(condition) == str and condition.strip() != "":
-        try:
-            df = df.query(condition,engine='python')
-        except:
-            write_format_columns('Filter condition-Result when error.xlsx',df,'content')
-            enter_exit(f'Unable to compile the following filter condition：\n"{condition}"')
-            
+    try:
+        df = df.query(condition,engine='python')
+    except:
+        write_format_columns('Filter condition-Result when error.xlsx',df,'content')
+        enter_exit(f'Unable to compile the following filter condition：\n"{condition}"')
     return df 
+
 
 def find_lack_columns(df, require_columns, error_func=''):
 
@@ -133,7 +123,7 @@ def find_lack_columns(df, require_columns, error_func=''):
 
 def column_gen_md5(df,unique_id_columns,target_column='MD5'):
     #几列合并 sum(多个字段) 
-    df[target_column] = df.loc[:,unique_id_columns].fillna('').astype(str).sum(1).apply(lambda x : generate_md5(x))
+    df[target_column] = df.loc[:,unique_id_columns].fillna('').astype(str).sum(1).swifter.apply(lambda x : generate_md5(x))
     return df 
 
 def fillna_with_dict(df,fillna_dict):
@@ -146,7 +136,7 @@ def fillna_with_dict(df,fillna_dict):
 
 
 def df_fillna_str(df):
-    df = df.fillna(value='').astype(str).apply(lambda x: x.str.strip())
+    df = df.fillna(value='').astype(str).swifter.apply(lambda x: x.str.strip())
     return df  
 
 #定位目标字段
@@ -173,8 +163,8 @@ def merge_case_insensitive(df_1,df_2,how, on):
         temp_name = f'lower_case_{i+1}' 
         df_1[temp_name] = ''
         df_2[temp_name] = ''
-        df_1[temp_name] = df_1[o].apply(lambda x: strQ2B(x.lower().strip()) if type(x) == str else x )
-        df_2[temp_name] = df_2[o].apply(lambda x: strQ2B(x.lower().strip()) if type(x) == str else x )
+        df_1[temp_name] = df_1[o].swifter.apply(lambda x: strQ2B(x.lower().strip()) if type(x) == str else x )
+        df_2[temp_name] = df_2[o].swifter.apply(lambda x: strQ2B(x.lower().strip()) if type(x) == str else x )
         temp_list.append(temp_name)
 
     if how == 'right':
@@ -187,6 +177,7 @@ def merge_case_insensitive(df_1,df_2,how, on):
     merged_df = merged_df.drop(temp_list, axis=1)
 
     return merged_df
+
 
 def fill_header_period(df,fill_period='实销-个月'):
     #转置表之后string类型的表头无法正确排序，用数字型表头转置完成后，再填充周期的文字 比如填充实销1个月，第4周
@@ -212,10 +203,10 @@ def get_year_month(string):
 def process_enddate(df):
     #处理截止时间,如果是X年X月的STR格式就提取年和月组合成日期，其他情况采用pd.to_datetime尝试转换
     df['enddate'] = df['enddate']\
-                .apply(lambda x: datetime.datetime(get_year_month(x)[0],get_year_month(x)[1],1) \
+                .swifter.apply(lambda x: datetime.datetime(get_year_month(x)[0],get_year_month(x)[1],1) \
                     if get_year_month(x) != None else pd.to_datetime(x))
     #变成最后一天为截止日期
-    df['enddate'] = df['enddate'].apply(lambda x:last_day_of_month(x))
+    df['enddate'] = df['enddate'].swifter.apply(lambda x:last_day_of_month(x))
     return df
 
 def split2multi_tables(df,index_list,column_list):
@@ -293,7 +284,7 @@ def check_abnormal_dates(df_worksheet,date_column,table_path,sheet):
         sys.exit()
 
     #如果发帖时间 被转成了int,float格式的时间 （在EXCEL会显示 1月2日，点进去单元格会出现正确的时间格式）
-    df_worksheet[date_column] = df_worksheet[date_column].apply(lambda x: \
+    df_worksheet[date_column] = df_worksheet[date_column].swifter.apply(lambda x: \
         datetime.strftime(xldate_as_datetime(x,0),'%Y-%m-%d') if (type(x) == int or type(x)==float) else x)
 
     try:
@@ -332,7 +323,7 @@ def normalize_column_dates(df_worksheet,date_columns):
             df_worksheet[date_column] = pd.to_datetime(df_worksheet[date_column])
         except :
             #如果发帖时间 被转成了int,float格式的时间 （在EXCEL会显示 1月2日，点进去单元格会出现正确的时间格式）
-            df_worksheet[date_column] = df_worksheet[date_column].apply(lambda x: \
+            df_worksheet[date_column] = df_worksheet[date_column].swifter.apply(lambda x: \
                 datetime.strftime(xldate_as_datetime(x,0),'%Y-%m-%d') if (type(x) == int or type(x)==float) else x)
             try:
                 df_worksheet[date_column] = pd.to_datetime(df_worksheet[date_column])
@@ -364,7 +355,7 @@ def normalize_dates(df_worksheet,date_columns,table_path='默认',sheet='默认'
 
         except :
             #如果发帖时间 被转成了int,float格式的时间 （在EXCEL会显示 1月2日，点进去单元格会出现正确的时间格式）
-            df_worksheet[date_column] = df_worksheet[date_column].apply(lambda x: \
+            df_worksheet[date_column] = df_worksheet[date_column].swifter.apply(lambda x: \
                 datetime.datetime.strftime(xldate_as_datetime(x,0),'%Y-%m-%d') if (type(x) == int or type(x)==float) else x)
             try:
                 df_worksheet[date_column] = pd.to_datetime(df_worksheet[date_column])
@@ -453,16 +444,16 @@ def split_column_by_words(df, split_words_dict):
                 
                 #找到所有能匹配上的 进行拆分
                 df_column_notnull[column] = df_column_notnull[column]\
-                    .apply(lambda x: [ x if x.strip() != '' else x for x in re.split(split_pat,x.strip(), flags=re.I)])
+                    .swifter.apply(lambda x: [ x if x.strip() != '' else x for x in re.split(split_pat,x.strip(), flags=re.I)])
                 df_column_notnull[column] = df_column_notnull[column]\
-                    .apply(lambda x: [ y for y in x if (y !='' and y != split_symbol) and y == y ])
+                    .swifter.apply(lambda x: [ y for y in x if (y !='' and y != split_symbol) and y == y ])
 
                 #重新合并
                 df = pd.concat([df_column_null,df_column_notnull],axis=0,ignore_index=True)
 
             elif split_symbol != '':
                 df[column] = df[column]\
-                .apply(lambda x:x.split(split_symbol) if type(x) == str else [x])
+                .swifter.apply(lambda x:x.split(split_symbol) if type(x) == str else [x])
             else:
                 pass
         except KeyError :
@@ -644,6 +635,39 @@ def stack_columns_to_multi_row(df,target_stack_name=None,regex_foramt=None):
     df = df.loc[:,df_columns]
     return  df 
 
+# def stack_columns_to_multi_row(df,stack_column):
+#   """将多个故障摊开的列以_id为主键，摊开成列表形式,之后可以进行摊开或者叠起操作，
+#   注意原始文档不能带有重复字段，否则也会被叠起来
+#   默认最后几列表头中带有0,1,2,3之类的属于应该被叠起来的故障现象"""
+#   #检查哪几个列带有数字的后缀
+#   stack_column_pat = '([^0-9]+)[0-9]{1,2}'
+#   df_columns = list(df.columns)
+#   stack_columns = [x for x in df_columns if re.match(stack_column_pat,x) != None]
+#   stack_line_list = [ ]
+#   if not stack_columns:
+#       print('数据中没有找到任何带有数字后缀的列')
+#   else:  #如果找到了对应列
+#       #先确认这些列是否连在一起，优先提取连在一起,并且处于后面的表头序列
+#       stack_column_index = [ df_columns.index(s) for s in stack_columns ]
+#       index_list = [ ]
+#       pre_index = 0 
+#       for i in range(1,len(df_columns)+1):
+#           if i in stack_column_index:
+#               if i - pre_index == 1 :
+#                   pre_index = i 
+#                   index_list.append(i)
+#               else:
+
+
+
+#       for i,row in df.iloc[:,stack_columns].iterrows():
+#           stack_line = ','.join([x for x in row.values if type(x)==str and x !='nan'])
+#           stack_line_list.append(stack_line)
+
+#   df[stack_column] = stack_line_list
+#   df_columns = [x for x in df_columns if x not in stack_columns] + [stack_column]
+#   df = df.loc[:,df_columns]
+#   return  df 
 
 def get_target_sheet(path,target_name):
     """
@@ -706,6 +730,7 @@ def get_target_sheet_wb(workbook,target_name,header=None):
     df.columns = [x.strip() for x in df.columns]
     return df
 
+
 def convert_word_freq_dict(dict_text):
     text = ''
     if type(dict_text) == str:
@@ -722,78 +747,43 @@ def group_by_concat(df, group_column, agg_func_column):
 
     #防止改到另外的部分
     df_copy = df.copy()
-    df_copy[agg_func_column] = df_copy[agg_func_column].fillna('').apply(lambda x : x if type(x) == str and x != '' else str(x) )
+    df_copy[agg_func_column] = df_copy[agg_func_column].swifter.apply(lambda x : x if type(x) == str else str(x))
     df_agg = df_copy.groupby(group_column)[agg_func_column].apply(' '.join)
     #以上结果是一个Series,需要转成DF, 不在这里reset_index，后面append本次结果 后面会用到groupby的index来concat
     df_agg = df_agg.to_frame()
 
     return df_agg 
 
-def group_word_count(df, group_column, agg_func, agg_func_column, keyword_list, stopword_list, count_keywords_only=False):
-    #获取分组词频, 每行单词不去重
-    df_agg = group_by_concat(df,group_column,agg_func_column)
-    #进行分词和统计等处理, 使用swifter加速
-    df_agg[agg_func_column] = df_agg[agg_func_column].swifter.progress_bar(enable=True, desc=agg_func)\
-                        .apply(lambda x: get_word_freq_dict(x, keyword_list,stopword_list,
-                                                    count_keywords_only=count_keywords_only, word_num=200))
-
-    df_agg[agg_func_column] = df_agg[agg_func_column].apply(lambda x: DfDict(x) )
-    #转成json,文本格式
-    # df_agg[agg_func_column] = df_agg[agg_func_column].apply(lambda x: json.dumps(x))
-    return df_agg
-
-def group_dict_sum(df, group_column, agg_func_column):
-
-    df[agg_func_column] = df[agg_func_column].apply(lambda x: json.loads(x) if type(x) == str else x )
-
-    df_agg = df.groupby(group_column).agg('sum')
-
-    #转成json,文本格式
-    df_agg[agg_func_column] = df_agg[agg_func_column].apply(lambda x: json.dumps(x) if isinstance(x,dict) else r'{}' )
-
-    return df_agg
-
 def word_agg_func(df, group_column, agg_func, agg_func_column, keyword_list, stopword_list):
-
-    #如果是统计的关键词，停用词直接置空
-    if 'keyword' in agg_func :
-        stopword_list = [ ]
-        #不允许关键词为空
-        if len(keyword_list) == 0 :
-            enter_exit('Can not find keywords with empty keyword list,please check the keyword files !') 
 
     #每条出现多次，只统计一次,不适用与sum的逻辑
     if 'unique' in agg_func and 'count' in agg_func:
-        df[agg_func_column] = df[agg_func_column].swifter.progress_bar(enable=True, desc=agg_func).apply(
-                                lambda x: ' '.join(set(process_text_eng(x, keyword_list, stopword_list))) if type(x) == str else x)
+        df[agg_func_column] = df[agg_func_column].swifter.apply(lambda x: ' '.join(set(process_text(x,stopword_dict))))
 
-    if 'keyword_count_en' == agg_func[:len('keyword_count_en')]:
-        df_agg = group_word_count(df, group_column, agg_func, agg_func_column, keyword_list=keyword_list, 
-                                    stopword_list = [ ], count_keywords_only=True)
+    if  agg_func  == "word_count_en" :
+        #获取分组词频, 每行单词不去重
+        df_agg = group_by_concat(df,group_column,agg_func_column)
+        #进行分词和统计等处理, 使用swifter加速
+        df_agg[agg_func_column] = df_agg[agg_func_column].swifter.apply(
+                            lambda x: get_word_freq_dict(x,keyword_list,stopword_list,200))
 
-    elif  "word_count_en" == agg_func[:len('word_count_en')]:
-        df_agg = group_word_count(df, group_column, agg_func, agg_func_column, keyword_list, stopword_list,
-                                    count_keywords_only=False)
+    elif agg_func == 'word_sum_en':
+        df[agg_func_column] = df[agg_func_column].swifter.apply(lambda x: json.loads(x) if type(x) ==str else x )
+        #再根据词频转回文本格式
+        df[agg_func_column] = df[agg_func_column].swifter.apply(lambda x: convert_word_freq_dict(x))
 
-    elif 'keyword_sum' == agg_func[:len('keyword_sum')]:  #和word_sum一样计算 字典内的数字相加
-        df_agg = group_dict_sum(df, group_column, agg_func_column )
-
-    elif 'word_sum' == agg_func[:len('word_sum')]:
-        df_agg = group_dict_sum(df, group_column, agg_func_column )
-
+        #合并所有文本
+        df_agg = group_by_concat(df,group_column,agg_func_column)
+        #进行分词和统计等处理
+        df_agg[agg_func_column] = df_agg[agg_func_column].swifter.apply(
+                        lambda x: get_word_freq_dict(x,keyword_list,stopword_list))
     else: #以下是暂时复制的，中文分词还没写
-        enter_exit(f'{agg_func} not supported yet.')
+        print('pass here ')
+        pass 
+    #转成json,文本格式
+    df_agg[agg_func_column] = df_agg[agg_func_column].swifter.apply(lambda x: json.dumps(x))
 
-    return df_agg 
-
-
-def create_group_empty(df, groups, value_column, fillna=0):
-    agg_df_sub = df.loc[:,groups + [ value_column ] ] 
-    agg_df_sub = agg_df_sub.drop_duplicates(subset=groups)
-    agg_df_sub = agg_df_sub.set_index(groups)
-    agg_df_sub[value_column] = fillna
-
-    return agg_df_sub 
+    return df_agg
 
 def group_basic_agg(df,group_column,agg_func, value_column=None, keyword_list= [],stopword_list=[ ], group_index=False):
     """
@@ -823,14 +813,12 @@ def group_basic_agg(df,group_column,agg_func, value_column=None, keyword_list= [
 
     if 'word' in agg_func:
         #注意这里的agg_func_columns是一个列表，如果需要做词频统计，需要取出第一个
-        df_copy_agg = word_agg_func(df_copy, group_column, agg_func, agg_func_column[0],keyword_list,stopword_list)
+        df_copy_agg = word_agg_func(df_copy,group_column, agg_func, agg_func_column[0],keyword_list,stopword_list)
     else:
         try:
-            df_copy_agg =  df_copy.groupby(group_column).agg(agg_func).sort_values(by=agg_func_column,ascending=False).fillna(0)
+            df_copy_agg =  df_copy.groupby(group_column).agg(agg_func).sort_values(by=agg_func_column,ascending=False)
         except AttributeError:
             enter_exit(f'"{agg_func}" function not found')
-        except: 
-            enter_exit(f'Failed to execute calc function: "{agg_func}" in "{agg_func_column[0]}"')
 
     if not group_index :
         df_copy_agg = df_copy_agg.reset_index()
@@ -844,10 +832,9 @@ def calc_total(df,total_column=0):
     :return : new df that has the last row name total 
     """
     df_copy = df.copy()
-    df_copy = df_copy.fillna(value=0).reset_index()
+    df_copy = df_copy.fillna(value=0)
     #calculate total get the last index
-    # last_index = df_copy.index.values[-1] + 1 
-    last_index = df_copy.shape[0]
+    last_index = df_copy.index.values[-1] + 1 
     total_series = pd.Series(df_copy.sum(axis=0,numeric_only=True),name=last_index)
     # total_series 
     df_copy = df_copy.append(total_series)
@@ -899,7 +886,7 @@ def calc_percent(df,total_column,calc_columns=None):
             #注意pandas的insert不返回任何结果
             df_copy.insert(c_index+1, series_name, percent_series)
             #格式化展示比率
-            # df_copy[series_name] = df_copy[series_name].apply(lambda x: '{}%'.format(round(x,2)) if type(x)==float else x )
+            # df_copy[series_name] = df_copy[series_name].swifter.apply(lambda x: '{}%'.format(round(x,2)) if type(x)==float else x )
         return df_copy
     else:
         return None 
@@ -911,7 +898,7 @@ def get_2_columns_div(df,dividend,divisor):
     :param dividend : 被除数  分子
     :param divisor :除数   分母
     """
-    result_series = (df[dividend]*100/df[divisor]).apply(lambda x: '{0:0.2f}%'.format(x) if type(x)==float else x )
+    result_series = (df[dividend]*100/df[divisor]).swifter.apply(lambda x: '{0:0.2f}%'.format(x) if type(x)==float else x )
 
     return result_series
 

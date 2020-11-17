@@ -17,3 +17,5 @@ def convert_list2dict(word_list):
 	for w in word_list:
 		word_dict[w] = 1
 	return word_dict
+
+

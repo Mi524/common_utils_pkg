@@ -1,7 +1,15 @@
 import re 
 from collections import defaultdict 
 from string import punctuation
+import string 
 
+
+def get_keyword_pat(keyword_list):
+    keyword_list = sorted(set(keyword_list), key=len, reverse=True)
+
+    keyword_pat = u'('+ '|'.join(keyword_list) + ')' 
+
+    return keyword_pat
 
 #数字模糊匹配函数,数字连着命中才算符合条件，即128对应的必须是128才算命中一个，命中12不算
 def number_similarity(a,b, common_pattern):
@@ -54,7 +62,7 @@ def check_syn_str_regex_number(string_a, string_b, special_syn_list):
 
 
 def strB2Q(ustring):
-    """把字符串全角转半角"""
+    """把字符串半角转全角"""
     ss = []
     for s in ustring:
         rstring = ""
@@ -71,22 +79,41 @@ def strB2Q(ustring):
     return ''.join(ss)
 
 
-def replace_punctuations(input_string, replace_to_symbol=' '):
-    #将字符串中的所有符号统一替换成空格
-    symbol_pat = ""
-    symbol_pat_list = [ ]
+def strQ2B(ustring):
+    """把字符串全角转半角"""
+    ss = []
+    for s in ustring:
+        rstring = ""
+        for uchar in s:
+            inside_code = ord(uchar)
+            if inside_code == 12288:  # 全角空格直接转换
+                inside_code = 32
+            elif (inside_code >= 65281 and inside_code <= 65374):  # 全角字符（除空格）根据关系转化
+                inside_code -= 65248
+            rstring += chr(inside_code)
+        ss.append(rstring)
+    return ''.join(ss)
+
+    
+def strip_puntuations(input_string):
+    #清空字符串两边的所有符号
 
     for x in punctuation:
-        if x not in ['+', ' '] :
-            symbol_pat = '\\' + x
-            symbol_pat_list.append(symbol_pat)
+        input_string = input_string.strip(x)
+    return input_string
 
-    symbol_pat_half_angle = '(' + '|'.join(symbol_pat_list) + ')'
-    symbol_pat_full_angle = '(' + '|'.join([ x for x in strB2Q(punctuation)]) + ')'
-    
-    input_string = re.sub(symbol_pat_half_angle,replace_to_symbol,input_string.strip())
-    input_string = re.sub(symbol_pat_full_angle,replace_to_symbol,input_string.strip())
+def replace_punctuations(input_string, replace_to_symbol=' ', exclude = [ ] ):
+    #将字符串中的所有符号统一替换成空格
+    if type(exclude) != list:
+        exclude = [ exclude ]
 
+    if type(input_string) != str:
+        return input_string
+
+    mapping_result = ''.join([replace_to_symbol if s not in exclude else s for s in string.punctuation])
+
+    translator = str.maketrans(string.punctuation, mapping_result)
+    input_string = input_string.translate(translator)
     return input_string 
 
 def replace_re_special(word):
@@ -95,7 +122,6 @@ def replace_re_special(word):
         new_special_symbol = '\\' + special_symbol
         word = word.replace(special_symbol, new_special_symbol)
     return word
-
 
 def replace_punctuation(string):
     punctuation = punctuation.replace('(','').replace(')','').replace('+','')
@@ -230,7 +256,7 @@ def partial_match_pct(short_str,long_str,special_syn=['pro','plus','max','youth'
 
     return default_result
 
-    
+
 def re_sub_replace(pattern,string,repace_symbols=('-','_'),group_name=1):
     """
     当re.sub(pattern,repl,string)内置的repl = "g<1>" 不能满足替换需求的时候,
@@ -249,36 +275,6 @@ def re_sub_replace(pattern,string,repace_symbols=('-','_'),group_name=1):
     
     new_string = re.sub(pattern,replace_match,string,repace_symbols=('-','_'))
     return new_string
-
-
-def standardize_country_by_cn_similarty(short_str, standard_str_list):
-    #处理中文国家缩写和完整国家名称无法匹配到的情况
-    standard_str_list = list(set([str(x).strip() for x in standard_str_list]))
-
-    standard_str_list = sorted(standard_str_list, key=len, reverse= False)
-    #通过前面字符串匹配 马来 -- > 马来西亚
-    standard_similarity_list = [ (s,1) if short_str in s else (s,0) for s in standard_str_list ]
-    if standard_similarity_list[0][1] > 0 :
-        return standard_similarity_list
-    else:
-        standard_similarity_list = [ ]
-        for ss in standard_str_list:
-            short_match_counter = 0
-            for ss_each_letter in ss:
-                for s in short_str:
-                    if s == ss_each_letter:
-                        short_match_counter += 1
-
-            #至少能匹配上两个字
-            str_similarity =  short_match_counter / len(short_str) + short_match_counter / min([len(short_str),len(ss)])
-            if short_match_counter >= 2 :
-                standard_similarity_list.append([ss,str_similarity])
-            else:
-                standard_similarity_list.append([ss, 0 ])
-
-        standard_similarity_list = sorted(standard_similarity_list, key=lambda x:x[1],reverse=True)
-
-    return standard_similarity_list
 
 
 def re_findall_replace(pattern,string,replace_symbols=('-','_')):
@@ -345,4 +341,37 @@ def split_wrong_combine(pattern,sub_pattern,string):
         new_string = new_string.replace(k,v)
         
     return new_string
+
+
+
+#++++++++++++++++++以下废弃函数++++++++++++++++++++++++
+
+# def standardize_country_by_cn_similarty(short_str, standard_str_list):
+#     #处理中文国家缩写和完整国家名称无法匹配到的情况
+#     standard_str_list = list(set([str(x).strip() for x in standard_str_list]))
+
+#     standard_str_list = sorted(standard_str_list, key=len, reverse= False)
+#     #通过前面字符串匹配 马来 -- > 马来西亚
+#     standard_similarity_list = [ (s,1) if short_str in s else (s,0) for s in standard_str_list ]
+#     if standard_similarity_list[0][1] > 0 :
+#         return standard_similarity_list
+#     else:
+#         standard_similarity_list = [ ]
+#         for ss in standard_str_list:
+#             short_match_counter = 0
+#             for ss_each_letter in ss:
+#                 for s in short_str:
+#                     if s == ss_each_letter:
+#                         short_match_counter += 1
+
+#             #至少能匹配上两个字
+#             str_similarity =  short_match_counter / len(short_str) + short_match_counter / min([len(short_str),len(ss)])
+#             if short_match_counter >= 2 :
+#                 standard_similarity_list.append([ss,str_similarity])
+#             else:
+#                 standard_similarity_list.append([ss, 0 ])
+
+#         standard_similarity_list = sorted(standard_similarity_list, key=lambda x:x[1],reverse=True)
+
+#     return standard_similarity_list
 
