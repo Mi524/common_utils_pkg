@@ -16,6 +16,9 @@ import numpy as np
 import xlwings as xw 
 import win32com.client as client
 
+warnings.filterwarnings('ignore')
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
 from pandas.core.indexes.multi import MultiIndex
 
 """pandas save_excel """
@@ -294,7 +297,8 @@ def replace_invalid_strs(string):
 		string = string.replace(i,'')
 	return string 
 
-def refresh_excel_calculations(file_path):
+def refresh_excel_calculations1(file_path):
+	#生成新的一个类
 	if not os.path.isabs(file_path):
 		file_path = os.path.join(os.getcwd(), file_path)
 
@@ -308,21 +312,24 @@ def refresh_excel_calculations(file_path):
 
 	del xlapp
 
-# def refresh_excel_calculations(file_path):
-# 	file_path = os.path.join(os.getcwd(), file_path )
-# 	#检查输出文件夹 是否存在
-# 	if not os.path.isfile(file_path):
-# 		enter_exit("File not found: ",file_path)
+def refresh_excel_calculations2(file_path):
+	#生成新的一个类
+	file_path = os.path.join(os.getcwd(), file_path )
+	#检查输出文件夹 是否存在
+	if not os.path.isfile(file_path):
+		enter_exit("File not found: ",file_path)
 
-# 	#打开文档，运行VBA, 如果有报错，everything 搜索gen_py文件 删除，让系统重新生成新的gen_py
-# 	xlapp = client.gencache.EnsureDispatch('Excel.Application')   
-# 	xlapp.Visible = 0  
-# 	xlapp.DisplayAlerts = False 
-# 	xlwb = xlapp.Workbooks.Open(file_path) 
-# 	xlwb.Visible = 0
-# 	xlapp.Calculate()
-# 	xlwb.Close(True)
-# 	xlapp.Quit
+	#打开文档，运行VBA, 如果有报错，everything 搜索gen_py文件 删除，让系统重新生成新的gen_py
+	xlapp = client.gencache.EnsureDispatch('Excel.Application')  
+	xlapp.Visible = 0  
+	xlapp.DisplayAlerts = False 
+	xlwb = xlapp.Workbooks.Open(file_path) 
+	xlwb.Visible = 0
+	xlapp.Calculate()
+	xlwb.Close(True)
+	xlapp.Quit
+
+	del xlapp
 
 def write_format_columns(save_path,df_list,sheet_name_list=[],pct_columns=[],round_columns=[],content_columns=[],**kwargs):
 	"""给定一个表格，用百分比写入包含指定文字的列,表头wrap_text, 添加选项,上面write_pct_columns方式不写是不希望每列str都变成text格式，

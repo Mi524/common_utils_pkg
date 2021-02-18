@@ -2,7 +2,7 @@ import re
 from collections import defaultdict, Counter
 from common_utils.regex_functions import replace_punctuations , replace_re_special, get_keyword_pat
 from common_utils.os_functions import enter_exit
-import xlrd 
+from openpyxl import load_workbook
 
 def convert_key2list(word_dict):
     word_list = []
@@ -21,15 +21,17 @@ def get_keyword_dict(path_list):
         path_list = [ path_list ]
 
     for path in path_list:
-        wb = xlrd.open_workbook(path)
+        # wb = xlrd.open_workbook(path)
+        wb = load_workbook(path)
         #sheet name传入颜色
-        sheet_names = wb.sheet_names()
+        sheet_names = wb.sheetnames
         for sn in sheet_names:
-            ws = wb.sheet_by_name(sn)
+            ws = wb.get_sheet_by_name(sn)
+            ws_values = list(ws.iter_rows())
             #表头,根据表头获取应该写入红色还是蓝色，还是粗体
             header_list = []
             try:
-                for x in ws.row(0):
+                for x in ws_values[0]:
                     if type(x.value) == str and x.value.strip() != '':
                         header = x.value.strip()
                     elif (type(x.value) == float or type(x.value) == int) :
@@ -47,7 +49,7 @@ def get_keyword_dict(path_list):
                     enter_exit(f'Error when reading keywords:\n{path}-"{sn}" should have at least one table header(keyword column names).')
 
             seen_keywords = set()
-            for row in list(ws.get_rows())[1:]:
+            for row in ws_values[1:]:
                 for i,format_word in enumerate(header_list):
                     if format_word != None:
                         keyword_value = row[i].value 
@@ -66,7 +68,7 @@ def get_keyword_dict(path_list):
                 if h != None :
                     keyword_format_dict[h] = sn.strip().lower() 
 
-        wb.release_resources()
+        wb.close()
 
     return keyword_dict, keyword_format_dict
 

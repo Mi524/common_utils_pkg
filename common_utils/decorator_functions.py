@@ -17,6 +17,15 @@ def catch_and_print(func):
 
 	return wrapper
 
+def catch_and_continue(func):
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e :
+            logging.error(traceback.format_exc())
+            #enter_exit(f'Error: Calling function: {func.__name__}')
+    return wrapper
+
 def df_row_num_decorator(func):
     def wrapper(*args, **kwargs):
         func_result = func(*args, **kwargs)

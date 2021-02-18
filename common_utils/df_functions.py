@@ -25,13 +25,14 @@ warnings.filterwarnings('ignore')
 
 def read_config_table(file_path, dtype=str):
 	df = pd.DataFrame([])
+	df_workbook = None 
 	#读取数据文件，只读取第一个肉眼可见的sheet
 	if '.xlsx' == file_path[-5:]:
 		df_workbook = pd.ExcelFile(file_path)
-		sheets_property_list = df_workbook.book.sheets()
-		for sheet_property in sheets_property_list:
-			if sheet_property.visibility  == 0:
-				df = df_workbook.parse(sheet_property.name, dtype=str)
+		sheet_name_list = df_workbook.book.sheetnames
+		for sheet in sheet_name_list:
+			if df_workbook.book.get_sheet_by_name(sheet).sheet_state  == 'visible':
+				df = df_workbook.parse(sheet, dtype=str)
 				break 
 	else:
 		try:
@@ -41,6 +42,10 @@ def read_config_table(file_path, dtype=str):
 
 	if df.empty:
 		enter_exit(f'Cannot read any visible table in "{file_path}"')
+
+	if df_workbook != None:
+		df_workbook.close()
+
 	return df 
 
 def read_data_file(file_path):
@@ -704,12 +709,11 @@ def get_target_sheet(path,target_name):
 	"""
 	match_list = [ ]
 	df_workbook = pd.ExcelFile(path)
-	sheets_property_list = df_workbook.book.sheets()
+	sheet_name_list = df_workbook.book.sheetnames
 
-	for sheet_property in sheets_property_list:
-		sheet_name = sheet_property.name 
-		sheet_visibility = sheet_property.visibility 
-		if sheet_visibility ==  0  and target_name in sheet_name:
+	for sheet_name in sheet_name_list:
+		sheet_visibility = df_workbook.book.get_sheet_by_name(sheet).sheet_state
+		if sheet_visibility ==  'visible'  and target_name in sheet_name:
 			match_list.append(sheet_name)
 	try:
 		match_sheetname = match_list[-1]
@@ -734,12 +738,11 @@ def get_target_sheet_wb(workbook,target_name,header=None):
 	和get_target_sheet的区别在于传入的是一个workbook，并且最后不会关闭workbook（需要读取其他sheet）
 	"""
 	match_list = [ ]
-	sheets_property_list = workbook.book.sheets()
+	sheet_name_list = workbook.book.sheetnames
 
-	for sheet_property in sheets_property_list:
-		sheet_name = sheet_property.name 
-		sheet_visibility = sheet_property.visibility 
-		if sheet_visibility ==  0  and target_name in sheet_name:
+	for sheet_name in sheet_name_list:
+		sheet_visibility = workbook.book.get_sheet_by_name(sheet).sheet_state
+		if sheet_visibility ==  'visible'  and target_name in sheet_name:
 			match_list.append(sheet_name)
 	try:
 		match_sheetname = match_list[-1]

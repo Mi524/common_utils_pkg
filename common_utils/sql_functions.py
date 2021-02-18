@@ -5,6 +5,7 @@ from sqlalchemy.sql import text
 from pathlib import Path
 from shutil import copyfile 
 import pandas as pd 
+import sqlite3
 import traceback
 import logging
 import os 
@@ -22,9 +23,30 @@ def get_most_upper_level_path(file_name):
     return temp_path
 
 def get_sql_connection(engine_text):
-    db = create_engine(engine_text,poolclass= NullPool)
-    conn = db.connect()
+
+    try:
+        print(f'Creating connection to {engine_text}')
+        db = create_engine(engine_text, poolclass=NullPool)
+        conn = db.connect()
+    except Exception as e :
+        logging.error(traceback.format_exc())
+        enter_exit(f"Failed to connect database with config:\n  {engine_text}")
+
     return conn, db
+
+def get_sqlite_connection(db_path):
+    if db_path.strip() == '':
+        db_path = ":memory:"
+    try:
+        print('Creating connection to {}'.format(db_path.strip(':')))
+        conn = sqlite3.connect(db_path)
+        #修改执行的等待时间，防止数据还没有写到库里面，另一个查询函数就开始 报错 table is locked
+        conn.execute("PRAGMA busy_timeout=1800000")
+        conn.commit()
+    except Exception as e:
+        logging.error(traceback.format_exc())
+        enter_exit(f"Failed to connect database with config:\n  {db_path}")
+    return conn 
 
 def close_sql_connection(conn,db):
     conn.close()
@@ -46,7 +68,6 @@ def convert_fetchall2df(fetchall_result):
     else:
         print('没有转换成功DF数据或未知异常')
         return pd.DataFrame([]) 
-
 
 def execute_fetchall_engine(engine_text,sql):
     # print(engine_text)

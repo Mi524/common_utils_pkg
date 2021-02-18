@@ -49,5 +49,3 @@ def nbconverter(notebookPath,directionPath=None):
 		print('{} has been saved'.format(directionPath))
 
 
-
-nbconverter(r"C:\Users\Administrator.DG-11030335\Scripts\voc_alarm\外销意见反馈预警监控\convert2alarm.ipynb")

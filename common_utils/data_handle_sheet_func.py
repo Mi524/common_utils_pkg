@@ -9,7 +9,11 @@ import warnings
 import pandas as pd
 import numpy as np
 import hashlib
+import sqlite3 
+
+from pathlib import Path
 from collections import defaultdict,Counter
+from pandas.core.indexes.multi import MultiIndex
 
 from common_utils.sequence_functions import list_diff_outer_join, lcs, filter_lcs
 from common_utils.os_functions import *
@@ -19,13 +23,30 @@ from common_utils.excel_functions import write_format_columns
 from common_utils.regex_functions import replace_re_special, replace_punctuations
 from common_utils.decorator_functions import *
 from common_utils.data_handle_func import * 
+from common_utils.sql_functions import convert_fetchall2df, get_sql_connection, get_sqlite_connection,close_sql_connection 
 
-from pandas.core.indexes.multi import MultiIndex
+import traceback
+import logging 
+
 
 class CsvSheetClass(object):
 	def __init__(self, table_path):
-		self.name = '{}'.format(table_path)
-		self.visibility = 0
+		self.name = table_path
+		self.visibility = 'visible'
+
+class ConnectionClass(object):
+	def __init__(self):
+		#判断该链接是否真实,如果为空，默认没有放入db connection配置，做SQL和WRITE TO DB的时候 需要建立一个临时数据库链接
+		self.cursor = None
+
+	def close(self):
+		pass 
+
+class DBClass(object):
+	def __init__(self):
+		pass 
+	def dispose(self):
+		pass 
 
 class Handler(object):
 
@@ -43,6 +64,10 @@ class Handler(object):
 		#concat_data之后 保存一个原始表提供给后面的match做提取
 		self.original_complete_header_df = None
 
+		self.db = DBClass()
+		self.conn = ConnectionClass()
+		self.cursor = None 
+	
 	@catch_and_print
 	def get_original2cn_dict(self, header_table_df, file_tag):
 		"""
@@ -91,7 +116,7 @@ class Handler(object):
 
 	#合并读取的数据表格, 该函数需要输入table_dict因为需要读取到, complete_header_df, 和target_cn_columns
 	@get_run_time
-	def concat_data(self ):
+	def concat_data(self):
 		# 此函数读取放入的数据表，必须要运行
 		for keys in self.table_dict.keys():
 			if 'mapping' in keys.lower():
@@ -108,14 +133,14 @@ class Handler(object):
 		info_path_list = get_walk_abs_files(self.input_dir)
 
 		# 检查是否有读取到各国的原始数据
-		info_path_list = [x for x in info_path_list if '~$' not in x and (
-			x[-5:].lower() == '.xlsx' or x[-4:].lower() in ['.xls', '.csv'])]
+		info_path_list = [x for x in info_path_list if is_excel_or_csv(x)]
 
 		if len(info_path_list) == 0:
 			enter_exit(f'Cannot find any data file in folder "{self.input_dir}" !\n')
 
 		success_sheet_df_list = []
 
+		df_workbook = None 
 		for table_path in info_path_list:
 			table_p = Path(table_path)
 			table_stem = table_p.stem
@@ -130,29 +155,38 @@ class Handler(object):
 			if not original2cn_dict:
 				enter_exit('"Data_processing_configuration" required mapping field "{}" not found !'.format(file_tag))
 
+			sheet_property_list = [ ]
 			# 如果是CSV文档
 			is_csv = False
 			is_xls_special = False
 			if table_suffix == '.csv':
 				is_csv = True
 				csv_sheet_class = CsvSheetClass(table_stem)
-				sheets_property_list = [csv_sheet_class]
+				sheet_property_list = [csv_sheet_class]
 			else:
 				try:
-					df_workbook = pd.ExcelFile(table_path)
-					sheets_property_list = df_workbook.book.sheets()
+					df_workbook = pd.ExcelFile(table_path, engine='openpyxl')
+					sheet_name_list = df_workbook.book.sheetnames
 					#试下能不能读取第一个sheet
-					df_workbook.parse(str(sheets_property_list[0].name))
-				except : #如果读取失败，尝试读取其他国家xls文档的格式
+					df_workbook.parse(str(sheet_name_list[0]))
+					#如果可以，做成property_list的列表形式
+					for s in sheet_name_list:
+						multi_sheet_class = CsvSheetClass(s)
+						multi_sheet_class.visibility = df_workbook.book.get_sheet_by_name(s).sheet_state
+						sheet_property_list.append(multi_sheet_class)
+				except Exception as e: #如果读取失败，尝试读取其他国家xls文档的格式
+					# logging.error(traceback.format_exc())
+					sheet_property_list = [ ]
 					is_xls_special = True 
 					xls_sheet_class = CsvSheetClass(table_stem)
-					sheets_property_list = [xls_sheet_class]
+					sheet_property_list = [xls_sheet_class]
 
-			# 过滤掉模板数据
-			for sheets_property in sheets_property_list:
-				sheet = sheets_property.name
-				sheet_visibility = sheets_property.visibility
-				if sheet_visibility == 0:  # 只读取可见的Sheet
+			for sheet_property in sheet_property_list:
+				sheet = sheet_property.name 
+
+				sheet_visibility = sheet_property.visibility
+				# 只读取可见的Sheet
+				if sheet_visibility == 'visible':  
 
 					if is_csv:
 						df_worksheet = read_csv_data(table_path)
@@ -164,7 +198,7 @@ class Handler(object):
 							continue
 					else:
 						df_worksheet = df_workbook.parse(str(sheet), na_values='')
-
+						df_worksheet = df_worksheet.dropna(how='all')
 					# 表头做小写等替换并且，通过字典rename,全部调整成去掉中间空格、去掉一切无意义符号的字段
 					df_worksheet.columns = [str(x).lower().strip().replace('\n', '').replace('\xa0', '')
 											.replace(' ', '').replace('\t', '')if x == x else x for x in 
@@ -203,6 +237,9 @@ class Handler(object):
 						print(f'Getting from: "{table_stem}",Sheet:{sheet}, {df_worksheet.shape[0]} rows')
 
 			success_sheet_df = pd.DataFrame(success_sheet_df_list, columns=['File Name', 'Source Sheet', 'Success reading records'])
+
+			if df_workbook != None:
+				df_workbook.close()
 
 		complete_header_df = dtype_handle(complete_header_df, dtype_dict)
 
@@ -614,20 +651,29 @@ class Handler(object):
 			source_column = row[1]
 			output_column = row[2]
 			extract_pattten = row[3]
+			findall_result_index = row[4]
+
+			if findall_result_index != '':
+				try:
+					findall_result_index = int(float(findall_result_index))
+				except :
+					findall_result_index = 0 
+			else:
+				findall_result_index = 0
 
 			find_lack_columns(complete_header_df, [source_column])
 
 			if source_column != '' and extract_pattten != '':
 				complete_header_df[output_column] = ''
 				complete_header_df[output_column] = complete_header_df[source_column]\
-				.apply(lambda x: '\n'.join(re.findall(extract_pattten,x,flags=re.I)).strip() if type(x) == str else '')
+				.apply(lambda x: re.findall(extract_pattten,x,flags=re.I)[findall_result_index] \
+					if type(x) == str and len(re.findall(extract_pattten,x,flags=re.I)) > 0  else '')
 
 		return complete_header_df
 
-
 	#***************以下是数据统计的函数***************************#
-
 	#如果配置表有时间的处理的部分，传入需要计算的时间周期
+	@catch_and_print
 	def calc_time(self, data_df,time_process_df):
 
 		if not time_process_df.empty and not data_df.empty:
@@ -798,3 +844,136 @@ class Handler(object):
 				data_df = data_df.reset_index(drop=False)
 
 		return data_df 
+
+	@catch_and_print
+	def exec_connection(self, data_df, connection_config_df):
+
+		db = DBClass()
+		#只读取见到的第一个数据库链接
+		counter = 0 
+		for row in connection_config_df.values:
+			db_system = row[0].lower().strip()
+			engine_text = row[1].strip()
+
+			if engine_text != '':
+				if 'mysql' in db_system :
+					conn, db = get_sql_connection(engine_text)
+				else: #默认是连接sqlite
+					conn = get_sqlite_connection(engine_text)
+				#只读取有效的第一个链接配置
+				break
+
+		#直接给instance赋值 
+		self.conn = conn
+		self.cursor = self.conn.cursor()
+
+		#单纯返回，不做任何修改
+		return data_df
+
+	@catch_and_print
+	def exec_sql(self,data_df, sql_config_df):
+		"""
+		读取表格里面的SQL语句，通过python内置的sqlite3来处理SQL查询，
+		最后一行的结果输出作为默认的complete_header_df输出到dataframe 
+		整体思路是，在内存打开一个数据库链接，在内存做SQL计算,把最后一个查询的结果作为DF结果数据
+		注意sqlite3部分语法和MYSQL不太一样，比如从别的表建新表 需要使用 
+		create table temp1 as select * from data_table
+		"""
+		#检查是否已经有数据库链接，如果有，直接用当前链接，否则创建新链接
+
+		if self.conn.cursor == None:
+			self.conn = get_sqlite_connection('')
+			self.cursor = self.conn.cursor()
+
+		row_counter = 0 
+		for row in sql_config_df.values:
+			sql_file_path = row[1].strip()
+			fetch_result_str = row[2].strip().lower()
+
+			if sql_file_path != '':
+				if_fetch_result = False
+
+				if fetch_result_str == 'yes':
+					if_fetch_result = True 
+
+				row_counter += 1 
+				sql = read_from_text(sql_file_path)
+
+				try:
+				#executescript支持输入multiple sql execution,但是不会返回任何查询结果，cursor.fetch不会获得任何数据
+					self.cursor.executescript(sql)
+				except Exception as e:
+					self.conn.close()
+					logging.error(traceback.format_exc())
+					enter_exit('Failed to execute sql:{}'.format(sql_file_path))
+
+		if if_fetch_result and row_counter >= 1: #确保有运行超过一次SQL
+			#如果结果为空，直接返回截止当前结果的表头（但结果内容必须为空白，以代表没有输出任何结果）
+			#需要将最后一个SQL再执行一次返回结果
+			data_df = pd.read_sql(sql,con=self.conn)
+
+		return data_df
+
+	@catch_and_print
+	def exec_write_to_db(self, data_df, write_db_config):
+		#从指定的文件夹或者指定文件获取数据，转成表格写入临时的数据库表,使得临时数据库能获取并写入其他需要用到的基础表
+		if self.conn.cursor == None:
+			self.conn = get_sqlite_connection('')
+			self.cursor = self.conn.cursor()
+			
+		table_values = write_db_config.values 
+
+		file_dict = defaultdict(set)
+
+		for row in table_values:
+			file_dir_or_path = row[1].strip()
+			sheet_name = row[2].strip()
+			table_name = row[3].strip()
+
+			if table_name != '':
+				print(f"Getting data from {file_dir_or_path}...")
+				#如果什么都没填，把之前的data_df直接写入
+				if file_dir_or_path == '':
+					file_dict[(table_name,sheet_name)].add('null')
+				else:
+					path_property = Path(file_dir_or_path)
+					if path_property.exists() :
+						#判断是文件夹还是文件,全部记录到列表内，后面统一读取
+						if path_property.is_dir():
+							file_list = [ x for x in os.listdir(file_dir_or_path) if '~$' not in x ]
+
+							file_dict[(table_name,sheet_name)] = set([ os.path.join(file_dir_or_path,x) for x in file_list \
+																	if is_excel_or_csv(x)])
+						elif path_property.is_file():
+							file_dict[(table_name,sheet_name)].add(file_dir_or_path)
+
+					else:
+						enter_exit(f"Input file path not exists!")
+		
+		if len(file_dict) > 0 :
+			#统一读取文件并写入 
+			for table_sheet, path_set in file_dict.items():
+
+				table_name = table_sheet[0]
+				sheet_name = table_sheet[1]
+
+				for path in path_set:
+					if path == "null":
+						db_data_df = data_df.copy()
+					elif '.xls' in path.lower()[-5:]:
+						if sheet_name != '':
+							db_data_df = pd.read_excel(path,sheet_name=sheet_name)
+						else:
+							db_data_df = pd.read_excel(path)
+					elif '.csv' == path.lower()[-4:]:
+						db_data_df = pd.read_csv(path)
+
+					dataframe_write_table(db_data_df, table_name, self.conn)
+
+					if path == None:
+						table_name = 'Mapping result'
+					print(f'Write to table "{table_name}" -- {db_data_df.shape[0]} rows')
+		else:
+			print("No data write to database")
+
+		return data_df

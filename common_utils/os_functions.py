@@ -1,3 +1,4 @@
+import io
 import os 
 import re  
 import time 
@@ -10,6 +11,10 @@ from pathlib import Path
 from glob import glob 
 from collections import defaultdict
 
+import logging 
+import traceback
+
+import chardet
 
 def get_folder_list(path='.\\',folder_name = ''):
 
@@ -96,6 +101,9 @@ def partial_filename_path(path,partial_file_name,prefered_num=-1):
         file_path = None
     
     return file_path
+
+def is_excel_or_csv(path):
+    return ('.xls' in path.lower()[-5:] or '.csv' == path.lower()[-4:]) and '~$' not in path
 
 def get_walk_files(path):
     """
@@ -359,3 +367,38 @@ def choose_sheet_column(file_path):
     column_choose = columns[column_choose_index]    
     #返回的是xlrd的wb
     return wb,ws,column_choose
+
+
+
+def read_from_text(path):
+    #读取TXT文件，在windows创建的txt通常是 utf-8 with bom格式，需要进行读取
+    bytes = min(32, os.path.getsize(path))
+    try:
+        with open(path, 'rb') as file:
+            raw = file.read(bytes)
+
+        if raw.startswith(codecs.BOM_UTF8):
+            encoding = 'utf-8-sig'
+        else:
+            result = chardet.detect(raw)
+            encoding = result['encoding']
+    except Exception as e :
+        logging.error(traceback.format_exc())
+        enter_exit("Failed to read txt file:{}".format(path))
+
+    #偶尔可能猜错编码，猜成了ascii，此时人工一个个编码去尝试
+    success_tag = 0 
+    for coding in [encoding,'utf-8','utf-8-sig','gbk','gb2312']:
+        try:
+            with io.open(path, 'r', encoding=coding) as infile:
+                content = infile.read()
+                success_tag = 1 
+        except Exception as e:
+            # logging.error(traceback.format_exc())
+            # enter_exit("Failed to read txt file:{}".format(path))
+            continue
+
+        if success_tag > 0 :
+            break 
+
+    return content
